@@ -1,113 +1,104 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
-	"os"
 )
 
-func readlines(path string, c chan string) {
-	file, err := os.Open(path)
-	if err != nil {
-		panic(err)
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-
-	for scanner.Scan() {
-		c <- scanner.Text()
-	}
-
-	if err := scanner.Err(); err != nil {
-		panic(err)
-	}
-
-	close(c)
+type mazeData struct {
+	data  []string
+	costs [][]int
 }
 
-type pipe struct {
+type pipe rune
+
+type connections struct {
 	n bool
 	s bool
 	e bool
 	w bool
 }
 
-func classify(c rune) pipe {
-	var p pipe
+func (maze mazeData) classify(y, x int) connections {
+	var conns connections
+	p := maze.getPipe(y, x)
 
-	switch c {
+	switch p {
 	case '|':
 		{
-			p.n = true
-			p.s = true
+			conns.n = true
+			conns.s = true
 		}
 	case '-':
 		{
-			p.w = true
-			p.e = true
+			conns.w = true
+			conns.e = true
 		}
 	case 'L':
 		{
-			p.n = true
-			p.e = true
+			conns.n = true
+			conns.e = true
 		}
 	case 'J':
 		{
-			p.n = true
-			p.w = true
+			conns.n = true
+			conns.w = true
 		}
 	case '7':
 		{
-			p.w = true
-			p.s = true
+			conns.w = true
+			conns.s = true
 		}
 	case 'F':
 		{
-			p.s = true
-			p.e = true
+			conns.s = true
+			conns.e = true
 		}
 	case 'S':
 		{
-			p.n = true
-			p.s = true
-			p.w = true
-			p.e = true
+			conns.n = true
+			conns.s = true
+			conns.w = true
+			conns.e = true
 		}
 	}
 
-	return p
+	return conns
 }
 
 func part1(filepath string) {
-	lines := load(filepath)
-	newLines := prune(lines)
-	dfs(newLines)
+	var maze mazeData
+
+	maze.load(filepath)
+	maze.prune()
+	maze.dfs_costs()
 }
 
 func part2(filepath string) {
-	lines := load(filepath)
-	newLines := prune(lines)
-	costs := dfs(newLines)
-	printLines(lines)
-	printCost(costs)
-	exploded := explode(costs, lines)
-	filled := fill(exploded)
-	imploded := implode(filled)
-	printCost(imploded)
-	inside := calculateInterior(imploded)
-	glyphs := getGlyphys(imploded, newLines)
-	printGlyphs(glyphs)
-	fmt.Println("inside: ", inside)
-	printCost(filled)
+	var maze mazeData
+
+	fmt.Println(filepath)
+	maze.load(filepath)
+	fmt.Println("Raw:")
+	maze.printLines()
+	fmt.Println("Loaded:")
+	maze.printGlyphs()
+	maze.prune()
+	fmt.Println("Pruned:")
+	maze.printGlyphs()
+	maze.clearOutside()
+	fmt.Println("Cleared:")
+	maze.printGlyphs()
+	inside := maze.calculateInterior()
+	fmt.Println("Inside count: ", inside)
+	maze.dfs_costs()
 }
 
-func calculateInterior(costs [][]int) int {
+func (maze mazeData) calculateInterior() int {
 	tiles := 0
 
-	for _, l := range costs {
+	for _, l := range maze.data {
 		for _, v := range l {
-			if v == 0 {
+			if v == '.' {
 				tiles++
 			}
 		}
@@ -116,7 +107,7 @@ func calculateInterior(costs [][]int) int {
 	return tiles
 }
 
-func load(filepath string) []string {
+func (maze *mazeData) load(filepath string) {
 	lines := []string{}
 	c := make(chan string)
 
@@ -126,43 +117,44 @@ func load(filepath string) []string {
 		lines = append(lines, s)
 	}
 
-	return lines
+	maze.data = lines
 }
 
-func getPipeRune(x, y int, lines []string) rune {
-	if x < 0 || y < 0 || y >= len(lines) || x >= len(lines[y]) {
+func (maze mazeData) getPipe(y, x int) pipe {
+	if x < 0 || y < 0 || y >= len(maze.data) || x >= len(maze.data[y]) {
 		return '.'
 	}
 
-	return rune(lines[y][x])
+	return pipe(maze.data[y][x])
 }
 
 // y x
 type pos struct {
-	x int
 	y int
+	x int
 }
 
-func findStart(lines []string) pos {
-	for y, l := range lines {
+func (maze mazeData) findStart() pos {
+	for y, l := range maze.data {
 		for x := range l {
-			if string(lines[y][x]) == "S" {
-				return pos{x, y}
+			if string(l[x]) == "S" {
+				return pos{y, x}
 			}
 		}
 	}
 
+	maze.printLines()
 	panic("Could not find start")
 }
 
-func dfs(lines []string) [][]int {
-	costs := make([][]int, len(lines))
+func (maze *mazeData) dfs_costs() {
+	costs := make([][]int, len(maze.data))
 
 	for i := range costs {
-		costs[i] = make([]int, len(lines[0]))
+		costs[i] = make([]int, len(maze.data[0]))
 	}
 
-	for y, l := range lines {
+	for y, l := range maze.data {
 		for x := range l {
 			costs[y][x] = 0
 		}
@@ -170,15 +162,15 @@ func dfs(lines []string) [][]int {
 
 	currentCost := 1
 	positions := []pos{}
-	positions = append(positions, findStart(lines))
+	positions = append(positions, maze.findStart())
 
 	for len(positions) > 0 {
 		nextPositions := []pos{}
 
-		addIfPipe := func(x, y int, w rune) {
-			r := getPipeRune(x, y, lines)
-			if r != '.' && costs[y][x] == 0 {
-				other := classify(r)
+		addIfPipe := func(y, x int, w rune) {
+			p := maze.getPipe(y, x)
+			if p != '.' && costs[y][x] == 0 {
+				other := maze.classify(y, x)
 				if w == 'w' && !other.w {
 					return
 				}
@@ -191,24 +183,24 @@ func dfs(lines []string) [][]int {
 				if w == 's' && !other.s {
 					return
 				}
-				nextPositions = append(nextPositions, pos{x, y})
+				nextPositions = append(nextPositions, pos{y, x})
 			}
 		}
 		for _, p := range positions {
 			costs[p.y][p.x] = currentCost
-			pipe := classify(getPipeRune(p.x, p.y, lines))
+			pipe := maze.classify(p.y, p.x)
 
 			if pipe.w {
-				addIfPipe(p.x-1, p.y, 'e')
+				addIfPipe(p.y, p.x-1, 'e')
 			}
 			if pipe.e {
-				addIfPipe(p.x+1, p.y, 'w')
+				addIfPipe(p.y, p.x+1, 'w')
 			}
 			if pipe.n {
-				addIfPipe(p.x, p.y-1, 's')
+				addIfPipe(p.y-1, p.x, 's')
 			}
 			if pipe.s {
-				addIfPipe(p.x, p.y+1, 'n')
+				addIfPipe(p.y+1, p.x, 'n')
 			}
 		}
 		positions = nextPositions
@@ -217,28 +209,29 @@ func dfs(lines []string) [][]int {
 
 	fmt.Printf("\nmax cost: %d\n", currentCost-2)
 
-	return costs
+	maze.costs = costs
 }
 
-func printLines(lines []string) {
-	for _, l := range lines {
+func (maze mazeData) printLines() {
+	for x, l := range maze.data {
+		fmt.Print(x)
 		fmt.Printf(l)
 		fmt.Println()
 	}
 }
 
-func printCost(cost [][]int) {
+func (maze mazeData) printCost() {
 	fmt.Println()
-	for y, l := range cost {
+	for y, l := range maze.costs {
 		fmt.Printf("%3d", y)
 		for _, v := range l {
 			var s string
 			if v == 0 {
-				s = fmt.Sprintf("%1s", ".")
+				s = fmt.Sprintf("%3s", ".")
 			} else if v == -1 {
 				s = fmt.Sprintf(" ")
 			} else {
-				s = fmt.Sprintf("%1s", "*")
+				s = fmt.Sprintf("%3d", v-1)
 			}
 			fmt.Printf(s)
 		}
@@ -246,39 +239,39 @@ func printCost(cost [][]int) {
 	}
 }
 
-func explode(costsIn [][]int, lines []string) [][]int {
-	costsOut := make([][]int, len(costsIn)*2)
+func explode(maze mazeData) [][]pipe {
+	exploded := make([][]pipe, len(maze.data)*2)
 
-	for i := range costsOut {
-		costsOut[i] = make([]int, len(costsIn[0])*2)
+	for i := range exploded {
+		exploded[i] = make([]pipe, len(maze.data[0])*2)
 	}
 
-	for y, l := range costsOut {
+	for y, l := range exploded {
 		for x := range l {
-			costsOut[y][x] = 0
+			exploded[y][x] = '.'
 		}
 	}
 
-	for y := 0; y < len(costsIn); y++ {
-		for x := 0; x < len(costsIn[y]); x++ {
-			v := costsIn[y][x]
-			costsOut[y*2][x*2] = v
-			if y < len(costsIn)-1 && connectedNS(y, x, lines) {
-				costsOut[y*2+1][x*2] = v
+	for y := 0; y < len(maze.data); y++ {
+		for x := 0; x < len(maze.data[y]); x++ {
+			v := maze.getPipe(y, x)
+			exploded[y*2][x*2] = v
+			if y < len(maze.data)-1 && maze.connectedNS(y, x) {
+				exploded[y*2+1][x*2] = '|'
 			}
-			if x < len(costsIn[0])-1 && connectedWE(y, x, lines) {
-				costsOut[y*2][x*2+1] = v
+			if x < len(maze.data[0])-1 && maze.connectedWE(y, x) {
+				exploded[y*2][x*2+1] = '-'
 			}
 		}
 	}
-	return costsOut
+	return exploded
 }
 
-func implode(costsIn [][]int) [][]int {
-	costsOut := make([][]int, len(costsIn)/2)
+func implode(costsIn [][]pipe) [][]pipe {
+	costsOut := make([][]pipe, len(costsIn)/2)
 
 	for i := range costsOut {
-		costsOut[i] = make([]int, len(costsIn[0])/2)
+		costsOut[i] = make([]pipe, len(costsIn[0])/2)
 	}
 
 	for y := 0; y < len(costsOut); y++ {
@@ -289,33 +282,20 @@ func implode(costsIn [][]int) [][]int {
 	return costsOut
 }
 
-func getGlyphys(costsIn [][]int, lines []string) [][]rune {
-	glyphs := make([][]rune, len(costsIn))
+func (maze mazeData) printGlyphs() {
+	glyphs := make([][]rune, len(maze.data))
 
-	for i := range glyphs {
-		glyphs[i] = make([]rune, len(costsIn[0]))
-	}
-
-	for y, l := range glyphs {
-		for x := range l {
-			glyphs[y][x] = ' '
+	for y := range glyphs {
+		glyphs[y] = make([]rune, len(maze.data[y]))
+		for x := range glyphs[y] {
+			v := rune(maze.data[y][x])
+			glyphs[y][x] = convLetter(v)
 		}
 	}
 
-	for y := 0; y < len(glyphs); y++ {
-		for x := 0; x < len(glyphs[y]); x++ {
-			v := costsIn[y][x]
-
-			if v == 0 {
-				glyphs[y][x] = '.'
-			} else if v > 0 {
-				letter := lines[y][x]
-				glyphs[y][x] = convLetter(rune(letter))
-			}
-		}
+	for _, l := range glyphs {
+		fmt.Println(string(l))
 	}
-
-	return glyphs
 }
 
 func convLetter(letter rune) rune {
@@ -335,49 +315,37 @@ func convLetter(letter rune) rune {
 	case 'S':
 		return '*'
 	default:
-		return '?'
+		return letter
 	}
 }
 
-/*
-╭─[1]─Status───────────────────────────────────────────────────────────────────────────────────╮
-│✓ aocgo2023 → master                                                                          │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-*/
+func (maze *mazeData) clearOutside() {
+	exploded := explode(*maze)
+	// filled has a border of 1 which we will remove before returning
+	filled := make([][]pipe, len(exploded)+2)
 
-func printGlyphs(glyphs [][]rune) {
-	for y, l := range glyphs {
-		fmt.Printf("%3d", y)
-		fmt.Println(string(l))
-	}
-}
-
-func fill(costsIn [][]int) [][]int {
-	// costsOut has a border of 1 which we will remove before returning
-	costsOut := make([][]int, len(costsIn)+2)
-
-	for i := range costsOut {
-		costsOut[i] = make([]int, len(costsIn[0])+2)
+	for i := range filled {
+		filled[i] = make([]pipe, len(exploded[0])+2)
 	}
 
-	for y, l := range costsIn {
+	for y, l := range exploded {
 		for x := range l {
-			costsOut[y+1][x+1] = costsIn[y][x]
+			filled[y+1][x+1] = exploded[y][x]
 		}
 	}
 
-	yMax := len(costsIn) - 1
-	xMax := len(costsIn[0]) - 1
+	yMax := len(exploded) - 1
+	xMax := len(exploded[0]) - 1
 
 	// fill borders
 	for y := 0; y <= yMax+2; y++ {
-		costsOut[y][0] = -1
-		costsOut[y][xMax+2] = -1
+		filled[y][0] = ' '
+		filled[y][xMax+2] = ' '
 	}
 
 	for x := 0; x <= xMax+2; x++ {
-		costsOut[0][x] = -1
-		costsOut[yMax+2][x] = -1
+		filled[0][x] = ' '
+		filled[yMax+2][x] = ' '
 	}
 
 	// bruteforce progressive fill
@@ -388,97 +356,105 @@ func fill(costsIn [][]int) [][]int {
 
 		for y := 1; y < yMax+2; y++ {
 			for x := 1; x < xMax+2; x++ {
-				if costsOut[y][x] == 0 && canFill(y, x, costsOut) {
-					costsOut[y][x] = -1
+				if filled[y][x] == '.' && canFill(y, x, filled) {
+					filled[y][x] = ' '
 					changed++
 				}
 			}
 		}
 	}
 
-	costsOut = costsOut[1 : yMax+2]
+	filled = filled[1 : yMax+2]
 
-	for y, l := range costsOut {
-		costsOut[y] = l[1 : xMax+2]
+	for y, l := range filled {
+		filled[y] = l[1 : xMax+2]
 	}
 
-	return costsOut
+	imploded := implode(filled)
+
+	lines := make([]string, len(imploded))
+
+	for x, pipes := range imploded {
+		lines[x] = string(pipes)
+	}
+
+	maze.data = lines
 }
 
-func canFill(y, x int, costs [][]int) bool {
-	if costs[y-1][x] == -1 {
+func canFill(y, x int, costs [][]pipe) bool {
+	if costs[y-1][x] == ' ' {
 		return true
 	}
 
-	if costs[y+1][x] == -1 {
+	if costs[y+1][x] == ' ' {
 		return true
 	}
 
-	if costs[y][x-1] == -1 {
+	if costs[y][x-1] == ' ' {
 		return true
 	}
 
-	if costs[y][x+1] == -1 {
+	if costs[y][x+1] == ' ' {
 		return true
 	}
 
-	if costs[y+1][x+1] == -1 {
+	if costs[y+1][x+1] == ' ' {
 		return true
 	}
 
-	if costs[y+1][x-1] == -1 {
+	if costs[y+1][x-1] == ' ' {
 		return true
 	}
 
-	if costs[y-1][x+1] == -1 {
+	if costs[y-1][x+1] == ' ' {
 		return true
 	}
 
-	if costs[y-1][x-1] == -1 {
+	if costs[y-1][x-1] == ' ' {
 		return true
 	}
 
 	return false
 }
 
-func connectedWE(y, x int, lines []string) bool {
-	p1 := classify(getPipeRune(x, y, lines))
-	p2 := classify(getPipeRune(x+1, y, lines))
+func (maze mazeData) connectedWE(y, x int) bool {
+	p1 := maze.classify(y, x)
+	p2 := maze.classify(y, x+1)
 
 	return p1.e && p2.w
 }
 
-func connectedNS(y, x int, lines []string) bool {
-	p1 := classify(getPipeRune(x, y, lines))
-	p2 := classify(getPipeRune(x, y+1, lines))
+func (maze mazeData) connectedNS(y, x int) bool {
+	p1 := maze.classify(y, x)
+	p2 := maze.classify(y+1, x)
 
 	return p1.s && p2.n
 }
 
-func survives(x, y int, lines []string) bool {
-	p := classify(getPipeRune(x, y, lines))
+func (maze mazeData) survives(y, x int) bool {
+	p := maze.classify(y, x)
 	hits := 0
 
 	if p.n {
-		p2 := classify(getPipeRune(x, y-1, lines))
+		p2 := maze.classify(y-1, x)
 		if p2.s {
 			hits++
 		}
 	}
 	if p.s {
-		p2 := classify(getPipeRune(x, y+1, lines))
+		p2 := maze.classify(y+1, x)
 		if p2.n {
 			hits++
 		}
 	}
 	if p.e {
-		p2 := classify(getPipeRune(x+1, y, lines))
+		p2 := maze.classify(y, x+1)
 		if p2.w {
 			hits++
 		}
 	}
 	if p.w {
-		p2 := classify(getPipeRune(x-1, y, lines))
+		p2 := maze.classify(y, x-1)
 		if p2.e {
 			hits++
 		}
@@ -487,40 +463,35 @@ func survives(x, y int, lines []string) bool {
 	return hits > 1
 }
 
-func prune(lines []string) []string {
-	var newLines []string
+func replaceAtIndex(in string, r rune, i int) string {
+	out := []rune(in)
+	out[i] = r
+	return string(out)
+}
 
+func (maze *mazeData) prune() {
 	for {
-		newLines = []string{}
 		changed := 0
 
-		for y, l := range lines {
-			nl := ""
+		for y, l := range maze.data {
 			for x := range l {
-				ok := survives(x, y, lines)
-				if ok {
-					nl += string(lines[y][x])
-				} else {
-					nl += "."
-					if string(lines[y][x]) != "." {
-						changed++
-					}
+				survives := maze.survives(y, x)
+				if !survives && maze.data[y][x] != '.' {
+					maze.data[y] = replaceAtIndex(maze.data[y], '.', x)
+					changed++
 				}
 			}
-			newLines = append(newLines, nl)
 		}
 
 		if changed == 0 {
 			break
 		}
-		lines = newLines
 	}
-
-	return newLines
 }
 
 func main() {
 	part2("test.txt")
+
 	part2("test2.txt")
 	part2("test3.txt")
 	part2("test4.txt")
